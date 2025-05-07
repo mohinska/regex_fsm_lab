@@ -1,12 +1,13 @@
-from __future__ import annotations
 from abc import ABC, abstractmethod
 
 
 class State(ABC):
-
-    @abstractmethod
-    def __init__(self) -> None:
-        pass
+    """
+    base class for states in the FSM
+    state can have multiple next states
+    """
+    def __init__(self):
+        self.next_states = []
 
     @abstractmethod
     def check_self(self, char: str) -> bool:
@@ -15,25 +16,23 @@ class State(ABC):
         """
         pass
 
-    def check_next(self, next_char: str) -> State | Exception:
-        for state in self.next_states:
-            if state.check_self(next_char):
-                return state
-        raise NotImplementedError("rejected string")
-
 
 class StartState(State):
-    next_states: list[State] = []
-
-    def __init__(self):
-        super().__init__()
+    """
+    state for start of the string
+    """
 
     def check_self(self, char):
-        return super().check_self(char)
+        return True
 
 
 class TerminationState(State):
-    pass  # Implement
+    """
+    state for end of the string
+    """
+
+    def check_self(self, char):
+        return True
 
 
 class DotState(State):
@@ -41,13 +40,8 @@ class DotState(State):
     state for . character (any character accepted)
     """
 
-    next_states: list[State] = []
-
-    def __init__(self):
-        super().__init__()
-
     def check_self(self, char: str):
-        pass  # Implement
+        return True
 
 
 class AsciiState(State):
@@ -55,85 +49,128 @@ class AsciiState(State):
     state for alphabet letters or numbers
     """
 
-    next_states: list[State] = []
-    curr_sym = ""
+    def __init__(self, symbol: str):
+        super().__init__()
+        self.symbol = symbol
 
-    def __init__(self, symbol: str) -> None:
-        pass  # Implement
-
-    def check_self(self, curr_char: str) -> State | Exception:
-        pass  # Implement
+    def check_self(self, char: str):
+        return char == self.symbol
 
 
 class StarState(State):
+    """
+    state for * character (0 or more times)
+    """
 
-    next_states: list[State] = []
-
-    def __init__(self, checking_state: State):
-        pass  # Implement
+    def __init__(self, checking_state):
+        super().__init__()
+        self.next_states.append(self)
+        self.checking_state = checking_state
 
     def check_self(self, char):
-        for state in self.next_states:
-            if state.check_self(char):
-                return True
+        return self.checking_state.check_self(char)
 
-        return False
 
 
 class PlusState(State):
-    next_states: list[State] = []
+    """
+    state for + character (1 or more times)
+    """
 
-    def __init__(self, checking_state: State):
-        pass  # Implement
+    def __init__(self, checking_state):
+        super().__init__()
+        self.next_states.append(self)
+        self.checking_state = checking_state
 
     def check_self(self, char):
-        pass  # Implement
+        return self.checking_state.check_self(char)
+
+
+class CharClassState(State):
+    """
+    state for character classes like [a-z0-9]
+    """
+
+    def __init__(self, allowed_chars: set[str]):
+        super().__init__()
+        self.allowed_chars = allowed_chars
+
+    def check_self(self, char: str):
+        return char in self.allowed_chars
 
 
 class RegexFSM:
-    curr_state: State = StartState()
+    def __init__(self, pattern: str):
+        self.start_state = StartState()
+        current_state = self.start_state
+        i = 0
 
-    def __init__(self, regex_expr: str) -> None:
+        while i < len(pattern):
+            char = pattern[i]
 
-        prev_state = self.curr_state
-        tmp_next_state = self.curr_state
+            if char == "[":
+                end_idx = pattern.find("]", i)
+                if end_idx == -1:
+                    raise ValueError("Unclosed character class '['")
 
-        for char in regex_expr:
-            tmp_next_state = self.__init_next_state(char, prev_state, tmp_next_state)
-            prev_state.next_states.append(tmp_next_state)
+                class_expr = pattern[i + 1:end_idx]
+                allowed_chars = set()
 
-    def __init_next_state(
-        self, next_token: str, prev_state: State, tmp_next_state: State
-    ) -> State:
-        new_state = None
+                j = 0
+                while j < len(class_expr):
+                    if j + 2 < len(class_expr) and class_expr[j + 1] == "-":
+                        start, end = class_expr[j], class_expr[j + 2]
+                        allowed_chars.update(chr(c) for c in range(ord(start), ord(end) + 1))
+                        j += 3
+                    else:
+                        allowed_chars.add(class_expr[j])
+                        j += 1
 
-        match next_token:
-            case next_token if next_token == ".":
-                new_state = DotState()
-            case next_token if next_token == "*":
-                new_state = StarState(tmp_next_state)
-                # here you have to think, how to do it.
+                new_state = CharClassState(allowed_chars)
+                i = end_idx
+            else:
+                if char == ".":
+                    new_state = DotState()
+                elif char.isascii():
+                    new_state = AsciiState(char)
+                elif char in ["*", "+"]:
+                    raise ValueError("'*' або '+' не можуть бути на початку шаблону")
+                else:
+                    raise ValueError(f"Недопустимий символ: {char}")
 
-            case next_token if next_token == "+":
-                pass  # Implement
+            if i + 1 < len(pattern):
+                next_char = pattern[i + 1]
+                if next_char == "*":
+                    new_state = StarState(new_state)
+                    i += 1
+                elif next_char == "+":
+                    new_state = PlusState(new_state)
+                    i += 1
 
-            case next_token if next_token.isascii():
-                new_state = AsciiState(next_token)
+            current_state.next_states.append(new_state)
+            current_state = new_state
+            i += 1
 
-            case _:
-                raise AttributeError("Character is not supported")
-
-        return new_state
-
-    def check_string(self):
-        pass  # Implement
+        current_state.next_states.append(TerminationState())
 
 
-if __name__ == "__main__":
-    regex_pattern = "a*4.+hi"
+    def check_string(self, string):
+        """
+        checks if the string matches the regex pattern
+        """
 
-    regex_compiled = RegexFSM(regex_pattern)
+        def dfs(state, i):
+            for next_state in state.next_states:
+                if isinstance(next_state, StarState) and next_state != state:
+                    if dfs(next_state, i):
+                        return True
 
-    print(regex_compiled.check_string("aaaaaa4uhi"))  # True
-    print(regex_compiled.check_string("4uhi"))  # True
-    print(regex_compiled.check_string("meow"))  # False
+                if i < len(string) and next_state.check_self(string[i]):
+                    if dfs(next_state, i + 1):
+                        return True
+
+                if i >= len(string) and isinstance(next_state, TerminationState):
+                    return True
+            return False
+
+        return dfs(self.start_state, 0)
